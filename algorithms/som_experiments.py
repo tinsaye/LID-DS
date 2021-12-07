@@ -4,6 +4,7 @@ from pprint import pprint
 
 from algorithms.features.impl.ngram import Ngram
 from algorithms.features.impl.path_evilness import PathEvilness
+from algorithms.features.impl.syscalls_in_time_window import SyscallsInTimeWindow
 from algorithms.features.impl.w2v_embedding import W2VEmbedding
 
 from algorithms.decision_engines.som import Som
@@ -13,7 +14,7 @@ from dataloader.direction import Direction
 
 if __name__ == '__main__':
     # data loader for scenario
-    base_path = '/home/felix/repos/uni/work/LID-DS/LID-DS-2019/'
+    base_path = '/home/felix/repos/LID-DS/LID-DS-2019'
     scenario = 'CVE-2017-7529'
     dataloader = dataloader_factory(os.path.join(base_path, scenario), direction=Direction.OPEN)
 
@@ -50,13 +51,17 @@ if __name__ == '__main__':
 
                 pe = PathEvilness(scenario_path=dataloader.scenario_path)
 
+                sit = SyscallsInTimeWindow(
+                    window_length_in_s=5
+                )
+
                 DE = Som(
                     epochs=epochs
                 )
 
                 # define the used features
                 ids = IDS(data_loader=dataloader,
-                          feature_list=[ngram, pe],
+                          feature_list=[ngram, pe, sit],
                           decision_engine=DE,
                           plot_switch=False)
 
