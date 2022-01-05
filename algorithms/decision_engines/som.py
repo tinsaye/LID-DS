@@ -46,6 +46,7 @@ class Som(BaseDecisionEngine):
         ), 0)
 
         som_size += 1
+        print(f'SOM SIZE: {int(som_size)}')
         return int(som_size)
 
     def train_on(self, input_array: list):

@@ -13,27 +13,27 @@ from dataloader.direction import Direction
 
 if __name__ == '__main__':
     # data loader for scenario
-    dataloader = dataloader_factory('/home/felix/repos/uni/work/LID-DS/LID-DS-2019/CVE-2017-7529', direction=Direction.OPEN)
+    dataloader = dataloader_factory('/home/felix/repos/uni/work/LID-DS/LID-DS-2019/PHP_CWE-434', direction=Direction.OPEN)
 
     w2v = W2VEmbedding(vector_size=5,
                        epochs=100,
                        path='Models',
-                       force_train=True,
+                       force_train=False,
                        distinct=True,
                        window_size=7,
                        thread_aware=True,
                        scenario_path=dataloader.scenario_path)
 
-    inte = IntEmbedding()
+    # inte = IntEmbedding()
 
     ngram = Ngram(
         feature_list=[w2v],
         thread_aware=True,
-        ngram_length=5
+        ngram_length=15
     )
 
 
-    pe = PathEvilness(scenario_path=dataloader.scenario_path)
+    # pe = PathEvilness(scenario_path=dataloader.scenario_path)
 
 
     DE = Som(
