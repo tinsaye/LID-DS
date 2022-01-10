@@ -6,15 +6,15 @@ from algorithms.features.w2v_embedding import W2VEmbedding
 from algorithms.decision_engines.som import Som
 from algorithms.ids import IDS
 from algorithms.score_plot import ScorePlot
-from dataloader.data_loader_2019 import DataLoader
-from dataloader.data_preprocessor import DataPreprocessor
+from dataloader.data_loader_2019 import DataLoader2019
+from algorithms.data_preprocessor import DataPreprocessor
 
 if __name__ == '__main__':
     """
     this is an example script to show the usage uf our classes
     """
     # data loader for scenario
-    dataloader = DataLoader('/home/felix/repos/LID-DS/LID-DS-2019/CVE-2017-7529')
+    dataloader = DataLoader2019('/home/felix/repos/LID-DS/LID-DS-2019/CVE-2017-7529')
 
     # decision engine (DE)
     DE = Som(
