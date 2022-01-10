@@ -127,4 +127,4 @@ class Som(BaseDecisionEngine):
                 If 1, the topology was not preserved for any of the samples.
         """
         self.custom_fields['training_quantization_error'] = self._som.quantization_error(self._buffer)
-        self.custom_fields['training_quantization_error'] = self._som.topographic_error(self._buffer)
+        self.custom_fields['training_topographic_error'] = self._som.topographic_error(self._buffer)
