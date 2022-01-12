@@ -3,6 +3,7 @@ import csv
 import json
 import pcapkit
 import zipfile
+from dataloader.base_recording import BaseRecording
 
 from dataloader.direction import Direction
 from dataloader.syscall import Syscall
@@ -10,7 +11,7 @@ from dataloader.resource_statistic import ResourceStatistic
 from dataloader.syscall_2021 import Syscall2021
 
 
-class Recording:
+class Recording2021(BaseRecording):
     """
 
         Single recording captured in 4 ways
@@ -55,7 +56,7 @@ class Recording:
             with zipfile.ZipFile(self.path, 'r') as zipped:
                 with zipped.open(self.name + '.sc') as unzipped:
                     for line_id, syscall in enumerate(unzipped, start=1):
-                        syscall_object = Syscall2021(syscall.decode('utf-8').rstrip(), line_id=line_id)
+                        syscall_object = Syscall2021(self.path, syscall.decode('utf-8').rstrip(), line_id=line_id)
                         if self._direction != Direction.BOTH:
                             if syscall_object.direction() == self._direction:
                                 yield syscall_object
@@ -139,20 +140,17 @@ class Recording:
              "time":{
                     "container_ready": {
                         "absolute": float,
-                        "relative": float,
                         "source": str
                     },
                     "exploit": [
                         {
                             "absolute": float,
                             "name": str,
-                            "relative": float,
                             "source": str
                         }
                     ]
                     "warmup_end": {
                         "absolute": float,
-                        "relative": float,
                         "source": str
                     }
                 }
