@@ -1,18 +1,28 @@
+from algorithms.building_block import BuildingBlock
+from dataloader.syscall import Syscall
+
 import os
 import math
 import numpy as np
 
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab import build_vocab_from_iterator
+from torchtext.datasets import Multi30k
+
 import torch
 import torch.nn as nn
+from torch import Tensor
+from torch.nn import Transformer
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 
-from tqdm import tqdm
+from timeit import default_timer as timer
 
-from algorithms.decision_engines.base_decision_engine import BaseDecisionEngine
+from torch.nn.utils.rnn import pad_sequence
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-class Transformer(BaseDecisionEngine):
+class TransformerDE(BuildingBlock):
     """
 
     LSTM decision engine
@@ -28,16 +38,13 @@ class Transformer(BaseDecisionEngine):
     """
 
     def __init__(self,
+                 input_vector: BuildingBlock,
                  ngram_length: int,
                  embedding_size: int,
-                 time_delta=0,
-                 thread_change_flag=0,
-                 return_value=0,
                  epochs=300,
-                 architecture=None,
                  batch_size=2,
-                 model_path='Models/',
-                 force_train=False):
+                 force_train=False,
+                 model_path='Models/'):
         """
 
         Args:
@@ -51,21 +58,20 @@ class Transformer(BaseDecisionEngine):
             force_train:        force training of Net
 
         """
+        super().__init__()
+        self._input_vector = input_vector
+        self._dependency_list = [input_vector]
         self._ngram_length = ngram_length
         self._embedding_size = embedding_size
         # input dim:
         #   time_delta and return value per syscall,
         #   thread change flag per ngram
-        self._input_dim = (self._ngram_length
-                           * (self._embedding_size+return_value+time_delta)
-                           + thread_change_flag)
         self._batch_size = batch_size
         self._epochs = epochs
         if not os.path.exists(model_path):
             os.makedirs(model_path)
         self._model_path = model_path \
-            + f'n{self._ngram_length}-e{self._embedding_size}-r{bool(return_value)}' \
-            + f'tcf{bool(thread_change_flag)}-td{bool(time_delta)}-ep{self._epochs}' \
+            + f'-ep{self._epochs}' \
             + f'b{self._batch_size}'
         self._training_data = {
             'x': [],
@@ -76,7 +82,6 @@ class Transformer(BaseDecisionEngine):
             'y': []
         }
         self._state = 'build_training_data'
-        self._architecture = architecture
         self._transformer = None
         self._batch_indices = []
         self._batch_indices_val = []
@@ -84,11 +89,13 @@ class Transformer(BaseDecisionEngine):
         self._current_batch_val = []
         self._batch_counter = 0
         self._batch_counter_val = 0
-        self._hidden = None
         self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self._device = torch.device("cpu")
 
-    def train_on(self, feature_list: list):
+    def depends_on(self):
+        return self._dependency_list
+
+    def train_on(self, syscall: Syscall, dependencies: dict):
         """
 
         create training data and keep track of batch indices
@@ -98,7 +105,10 @@ class Transformer(BaseDecisionEngine):
             feature_list (int): list of prepared features for DE
 
         """
-        if self._transformer is None:
+        feature_list = None
+        if self._input_vector.get_id() in dependencies:
+            feature_list = dependencies[self._input_vector.get_id()]
+        if self._transformer is None and feature_list is not None:
             x = np.array(feature_list[:-1])
             y = np.array(feature_list[1:])
             self._training_data['x'].append(x)
@@ -111,7 +121,7 @@ class Transformer(BaseDecisionEngine):
         else:
             pass
 
-    def val_on(self, feature_list: list):
+    def val_on(self, syscall: Syscall, dependencies: dict):
         """
 
         create validation data and keep track of batch indices
@@ -121,7 +131,10 @@ class Transformer(BaseDecisionEngine):
             feature_list (int): list of prepared features for DE
 
         """
-        if self._transformer is None:
+        feature_list = None
+        if self._input_vector.get_id() in dependencies:
+            feature_list = dependencies[self._input_vector.get_id()]
+        if self._transformer is None and feature_list is not None:
             x = np.array(feature_list[:-1])
             y = np.array(feature_list[1:])
             self._validation_data['x'].append(x)
@@ -141,64 +154,39 @@ class Transformer(BaseDecisionEngine):
             y_tensors = y_tensors.long()
             x_tensors_final = torch.reshape(x_tensors, (x_tensors.shape[0], 1, x_tensors.shape[1]))
             print(f"Training Shape x: {x_tensors_final.shape} y: {y_tensors.shape}")
-            return SyscallFeatureDataSet(x_tensors_final, y_tensors)
+            return SyscallFeatureDataSet(x_tensors_final, y_tensors), y_tensors
         else:
             x_tensors = Variable(torch.Tensor(self._validation_data['x'])).to(self._device)
             y_tensors = Variable(torch.Tensor(self._validation_data['y'])).to(self._device)
             y_tensors = y_tensors.long()
             x_tensors_final = torch.reshape(x_tensors, (x_tensors.shape[0], 1, x_tensors.shape[1]))
             print(f"Validation Shape x: {x_tensors_final.shape} y: {y_tensors.shape}")
-            return SyscallFeatureDataSet(x_tensors_final, y_tensors)
+            return SyscallFeatureDataSet(x_tensors_final, y_tensors), y_tensors
 
     def fit(self):
         """
         """
-
-        self._transformer = TransformerNet(
-            num_tokens=4,
-            dim_model=8,
-            num_heads=2,
-            num_encoder_layers=3,
-            num_decoder_layers=4,
-            dropout_p=0.1
-        )
-        opt = torch.optim.SGD(self._transformer.parameters(), lr=0.01)
-        loss_fn = nn.CrossEntropyLoss()
-        train_loss_list = []
-        print("Training model")
-        train_dataset = self._create_train_data(val=False)
+        if self._state == 'build_training_data':
+            self._state = 'fitting'
+        train_dataset, y_tensors = self._create_train_data(val=False)
+        val_dataset, y_tensors_val = self._create_train_data(val=True)
+        # for custom batches
         train_dataloader = DataLoader(train_dataset, batch_sampler=self._batch_indices)
-        for epoch in range(self._epochs):
-            print("-"*25, f"Epoch {epoch + 1}", "-"*25)
-            train_loss = 0
-            for batch in train_dataloader:
-                print(batch)
-                X, y = batch[0], batch[1]
-                print(X, y)
-                # X, y = torch.tensor(X).to(self._device), torch.tensor(y).to(self._device)
-                # shift target by one
-                y_input = y[:, :-1]
-                y_expected = y[:, 1:]
-
-                # get mask to mask out next words
-                sequence_length = y_input.size(1)
-                tgt_mask = self._transformer.get_tgt_mask(sequence_length).to(self._device)
-
-                # standard training except passing y_input and tgt_mask
-                pred = self._transformer(X, y_input, tgt_mask)
-
-                # permute to have batch size first
-                pred = pred.permute(1, 2, 0)
-                loss = loss_fn(pred, y_expected)
-
-                opt.zero_grad()
-                loss.backward()
-                opt.step()
-
-                train_loss += loss.detach().item()
-            train_loss_list += [train_loss]
-
-        return train_loss_list
+        for data in train_dataloader:
+            print(data[0])
+            break
+        # val_dataloader = DataLoader(val_dataset, batch_sampler=self._batch_indices_val)
+        # learning_rate = 0.001
+        # optimizer = torch.optim.Adam(self.transformer.parameters(),
+                                     # lr=learning_rate,
+                                     # betas=(0.9, 0.98),
+                                     # eps=1e-9)
+        # for epoch in range(1, self._epochs+1):
+            # start_time = timer()
+            # train_loss = self.train_epoch(self._transformer, optimizer)
+            # end_time = timer()
+            # val_loss = self.evaluate(self.transformer)
+            # print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
 
     def predict(self, feature_list: list) -> float:
         """
@@ -213,6 +201,32 @@ class Transformer(BaseDecisionEngine):
 
         """
         pass
+
+    def calculate(self, syscall: Syscall, dependencies: dict):
+        """
+
+        remove label from feature_list and feed feature_list and hidden state into model.
+        model returns probabilities of every syscall seen in training + index 0 for unknown syscall
+        index of actual syscall gives predicted_prob
+        Returns:
+            float: anomaly score
+
+        """
+
+        feature_list = None
+        if self._input_vector.get_id() in dependencies:
+            feature_list = dependencies[self._input_vector.get_id()]
+        if feature_list is not None:
+            x_tensor = Variable(torch.Tensor(np.array([feature_list[1:]])))
+            x_tensor_final = torch.reshape(x_tensor, (x_tensor.shape[0], 1, x_tensor.shape[1]))
+            actual_syscall = feature_list[0]
+            anomaly_score = 0
+            # prediction_logits, self._hidden = self._lstm(x_tensor_final,
+                                                        # self._hidden)
+            # softmax = nn.Softmax(dim=0)
+            # predicted_prob = float(softmax(prediction_logits[0])[actual_syscall])
+            # anomaly_score = 1 - predicted_prob
+            dependencies[self.get_id()] = anomaly_score
 
     def new_recording(self, val: bool = False):
         """
@@ -237,116 +251,62 @@ class Transformer(BaseDecisionEngine):
         else:
             pass
 
+    def train_epoch(model, optimizer):
+        model.train()
+        losses = 0
+        SRC_LANGUAGE = de
+        TGT_LANGUAGE = en
+        train_iter = Multi30k(split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+        train_dataloader = DataLoader(train_iter, batch_size=BATCH_SIZE, collate_fn=collate_fn)
 
-class TransformerNet(nn.Module):
-    def __init__(
-        self,
-        num_tokens,
-        dim_model,
-        num_heads,
-        num_encoder_layers,
-        num_decoder_layers,
-        dropout_p,
-    ):
-        super().__init__()
+        for src, tgt in train_dataloader:
+            print(src)
+            print(len(src))
+            print(tgt)
+            print(len(tgt))
+            src = src.to(DEVICE)
+            tgt = tgt.to(DEVICE)
 
-          # INFO
-        self.model_type = "Transformer"
-        self.dim_model = dim_model
+            tgt_input = tgt[:-1, :]
 
-        # LAYERS
-        self.positional_encoder = PositionalEncoding(
-            dim_model=dim_model, dropout_p=dropout_p, max_len=5000
-        )
-        self.embedding = nn.Embedding(num_tokens, dim_model)
-        self.transformer = nn.Transformer(
-            d_model=dim_model,
-            nhead=num_heads,
-            num_encoder_layers=num_encoder_layers,
-            num_decoder_layers=num_decoder_layers,
-            dropout=dropout_p,
-        )
-        self.out = nn.Linear(dim_model, num_tokens)
+            src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt_input)
 
-    def forward(
-        self,
-        src,
-        tgt,
-        tgt_mask=None,
-        src_pad_mask=None,
-        tgt_pad_mask=None
-    ):
-        # Src size must be (batch_size, src sequence length)
-        # Tgt size must be (batch_size, tgt sequence length)
+            logits = model(src, tgt_input, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask, src_padding_mask)
 
-        # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
-        src = self.embedding(src) * math.sqrt(self.dim_model)
-        tgt = self.embedding(tgt) * math.sqrt(self.dim_model)
-        src = self.positional_encoder(src)
-        tgt = self.positional_encoder(tgt)
+            optimizer.zero_grad()
 
-        # we permute to obtain size (sequence length, batch_size, dim_model),
-        src = src.permute(1, 0, 2)
-        tgt = tgt.permute(1, 0, 2)
+            tgt_out = tgt[1:, :]
+            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
+            loss.backward()
 
-        # Transformer blocks - Out size = (sequence length, batch_size, num_tokens)
-        transformer_out = self.transformer(src, tgt)
-        out = self.out(transformer_out)
+            optimizer.step()
+            losses += loss.item()
 
-        return out
+        return losses / len(train_dataloader)
 
-    def get_tgt_mask(self, size) -> torch.tensor:
-        # Generates a squeare matrix where the each row allows one word more to be seen
-        mask = torch.tril(torch.ones(size, size) == 1)  # Lower triangular matrix
-        mask = mask.float()
-        mask = mask.masked_fill(mask == 0, float('-inf'))  # Convert zeros to -inf
-        mask = mask.masked_fill(mask == 1, float(0.0))  # Convert ones to 0
+    def evaluate(model):
+        model.eval()
+        losses = 0
 
-        # EX for size=5:
-        # [[0., -inf, -inf, -inf, -inf],
-        #  [0.,   0., -inf, -inf, -inf],
-        #  [0.,   0.,   0., -inf, -inf],
-        #  [0.,   0.,   0.,   0., -inf],
-        #  [0.,   0.,   0.,   0.,   0.]]
+        val_iter = Multi30k(split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+        val_dataloader = DataLoader(val_iter, batch_size=BATCH_SIZE, collate_fn=collate_fn)
+        loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
-        return mask
+        for src, tgt in val_dataloader:
+            src = src.to(DEVICE)
+            tgt = tgt.to(DEVICE)
 
-    def create_pad_mask(self, matrix: torch.tensor, pad_token: int) -> torch.tensor:
-        # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
-        # [False, False, False, True, True, True]
-        return (matrix == pad_token)
+            tgt_input = tgt[:-1, :]
 
+            src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt_input)
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, dim_model, dropout_p, max_len):
-        super().__init__()
-        # Modified version from: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
-        # max_len determines how far the position can have an effect on a token (window)
+            logits = model(src, tgt_input, src_mask, tgt_mask,src_padding_mask, tgt_padding_mask, src_padding_mask)
 
-        # Info
-        self.dropout = nn.Dropout(dropout_p)
+            tgt_out = tgt[1:, :]
+            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
+            losses += loss.item()
 
-        # Encoding - From formula
-        pos_encoding = torch.zeros(max_len, dim_model)
-        positions_list = torch.arange(0,
-                                      max_len,
-                                      dtype=torch.float).view(-1, 1)  # 0, 1, 2, 3, 4, 5
-        division_term = torch.exp(torch.arange(0, dim_model, 2).float()
-                                  * (-math.log(10000.0)) / dim_model)  # 1000^(2i/dim_model)
-
-        # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
-        pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
-
-        # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
-        pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
-
-        # Saving buffer (same as parameter without gradients needed)
-        pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
-        self.register_buffer("pos_encoding", pos_encoding)
-
-    def forward(self, token_embedding: torch.tensor) -> torch.tensor:
-        # Residual connection + pos encoding
-        return self.dropout(token_embedding + self.pos_encoding[:token_embedding.size(0), :])
+        return losses / len(val_dataloader)
 
 
 class SyscallFeatureDataSet(Dataset):
@@ -364,3 +324,73 @@ class SyscallFeatureDataSet(Dataset):
         _x = self.X[index]
         _y = self.Y[index]
         return _x, _y
+
+
+# Seq2Seq Network
+class Seq2SeqTransformer(nn.Module):
+    def __init__(self,
+                 num_encoder_layers: int,
+                 num_decoder_layers: int,
+                 emb_size: int,
+                 nhead: int,
+                 src_vocab_size: int,
+                 tgt_vocab_size: int,
+                 dim_feedforward: int = 512,
+                 dropout: float = 0.1):
+        super(Seq2SeqTransformer, self).__init__()
+        self.transformer = Transformer(d_model=emb_size,
+                                       nhead=nhead,
+                                       num_encoder_layers=num_encoder_layers,
+                                       num_decoder_layers=num_decoder_layers,
+                                       dim_feedforward=dim_feedforward,
+                                       dropout=dropout)
+        self.generator = nn.Linear(emb_size, tgt_vocab_size)
+        self.src_tok_emb = TokenEmbedding(src_vocab_size, emb_size)
+        self.tgt_tok_emb = TokenEmbedding(tgt_vocab_size, emb_size)
+        self.positional_encoding = PositionalEncoding(
+            emb_size, dropout=dropout)
+
+    def forward(self,
+                src: Tensor,
+                trg: Tensor,
+                src_mask: Tensor,
+                tgt_mask: Tensor,
+                src_padding_mask: Tensor,
+                tgt_padding_mask: Tensor,
+                memory_key_padding_mask: Tensor):
+        src_emb = self.positional_encoding(self.src_tok_emb(src))
+        tgt_emb = self.positional_encoding(self.tgt_tok_emb(trg))
+        outs = self.transformer(src_emb, tgt_emb, src_mask, tgt_mask, None,
+                                src_padding_mask, tgt_padding_mask, memory_key_padding_mask)
+        return self.generator(outs)
+
+    def encode(self, src: Tensor, src_mask: Tensor):
+        return self.transformer.encoder(self.positional_encoding(
+                            self.src_tok_emb(src)), src_mask)
+
+    def decode(self, tgt: Tensor, memory: Tensor, tgt_mask: Tensor):
+        return self.transformer.decoder(self.positional_encoding(
+                          self.tgt_tok_emb(tgt)), memory,
+                          tgt_mask)
+
+
+# helper Module that adds positional encoding to the token embedding
+# to introduce a notion of word order.
+class PositionalEncoding(nn.Module):
+    def __init__(self,
+                 emb_size: int,
+                 dropout: float,
+                 maxlen: int = 5000):
+        super(PositionalEncoding, self).__init__()
+        den = torch.exp(- torch.arange(0, emb_size, 2) * math.log(10000) / emb_size)
+        pos = torch.arange(0, maxlen).reshape(maxlen, 1)
+        pos_embedding = torch.zeros((maxlen, emb_size))
+        pos_embedding[:, 0::2] = torch.sin(pos * den)
+        pos_embedding[:, 1::2] = torch.cos(pos * den)
+        pos_embedding = pos_embedding.unsqueeze(-2)
+
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('pos_embedding', pos_embedding)
+
+    def forward(self, token_embedding: Tensor):
+        return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
