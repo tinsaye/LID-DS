@@ -9,34 +9,38 @@ if __name__ == '__main__':
     this is an example script to show the usage uf our classes
     """
     ngram_length = 6
-    embedding_size = 1
     thread_aware = True
     scenario = "CVE-2017-7529"
     scenario_path = f'../../Dataset/{scenario}/'
+
+    # data loader for scenario
     dataloader = dataloader_factory(scenario_path)
+
+    # embedding
     int_embedding = IntEmbedding()
 
+    # ngram
     ngram = Ngram(feature_list=[int_embedding],
                   thread_aware=True,
                   ngram_length=ngram_length)
 
-    # decision engine (DE)
     distinct_syscalls = dataloader.distinct_syscalls_training_data()
+    # decision engine (DE)
     transformer = TransformerDE(input_vector=ngram,
-                                ngram_length=ngram_length,
-                                embedding_size=embedding_size,
+                                distinct_syscalls=distinct_syscalls,
                                 epochs=20,
                                 batch_size=2,
                                 force_train=True,
                                 model_path=f'Models/Transformer/{scenario}/')
 
-    # define the used features
+    # define the used features and train
     ids = IDS(data_loader=dataloader,
               resulting_building_block=transformer,
               plot_switch=True)
 
-    ids.train_decision_engine()
-    # ids.determine_threshold()
+    # threshold
+    ids.determine_threshold()
+    # detection
     # ids.do_detection()
     # pprint(ids.performance.get_performance())
 
