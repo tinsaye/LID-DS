@@ -113,9 +113,7 @@ class TransformerDE(BuildingBlock):
         if self._input_vector.get_id() in dependencies:
             feature_list = dependencies[self._input_vector.get_id()]
         if self._transformer is None and feature_list is not None:
-            x = np.array(feature_list)
-            # x = [SOS] + x + [EOS]
-            # self._training_data.append([SOS] + x + [EOS])
+            x = np.array([SOS] + list(feature_list) + [EOS])
             self._training_data.append(x)
             self._current_batch.append(self._batch_counter)
             self._batch_counter += 1
@@ -139,7 +137,7 @@ class TransformerDE(BuildingBlock):
         if self._input_vector.get_id() in dependencies:
             feature_list = dependencies[self._input_vector.get_id()]
         if self._transformer is None and feature_list is not None:
-            x = np.array(feature_list)
+            x = np.array([SOS] + list(feature_list) + [EOS])
             self._validation_data.append(x)
             self._current_batch_val.append(self._batch_counter_val)
             self._batch_counter_val += 1
@@ -151,6 +149,7 @@ class TransformerDE(BuildingBlock):
 
     def _create_train_data(self, val: bool):
         if not val:
+            print(self._training_data[0:3])
             x_tensors = Variable(torch.Tensor(self._training_data)).to(self._device)
             x_tensors_final = torch.reshape(x_tensors, (x_tensors.shape[0], 1, x_tensors.shape[1]))
             print(f"Training Shape x: {x_tensors_final.shape}")
@@ -260,19 +259,16 @@ class TransformerDE(BuildingBlock):
         total_loss = 0
 
         for batch in dataloader:
-            print(batch)
+            # print(batch)
             X = batch
             y = batch
-            # X, y = batch[:, 0], batch[:, 1]
             X, y = torch.tensor(X).to(DEVICE), torch.tensor(y).to(DEVICE)
-            # print(X)
-            print(y)
+            y = torch.squeeze(y)
+            X = torch.squeeze(X)
 
             # Now we shift the tgt by one so with the <SOS> we predict the token at pos 1
             y_input = y[:, :-1]
             y_expected = y[:, 1:]
-            print(y_input)
-            print(y_expected)
 
             # Get mask to mask out the next words
             sequence_length = y_input.size(1)
