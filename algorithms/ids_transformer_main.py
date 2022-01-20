@@ -8,7 +8,7 @@ if __name__ == '__main__':
     """
     this is an example script to show the usage uf our classes
     """
-    ngram_length = 6
+    ngram_length = 8
     thread_aware = True
     scenario = "CVE-2017-7529"
     scenario_path = f'../../Dataset/{scenario}/'

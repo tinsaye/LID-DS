@@ -16,8 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Start of sentence and end of sentence
-SOS, EOS = -1, -2
-UNK_IDX, PAD_IDX = 1, 3
+UNK_IDX, PAD_IDX = -3, -4
 
 
 class TransformerDE(BuildingBlock):
@@ -82,16 +81,19 @@ class TransformerDE(BuildingBlock):
         self._batch_counter = 0
         self._batch_counter_val = 0
         self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self._device = torch.device("cpu")
-        NUM_HEAD = 8
-        NUM_TOKENS = 4
+        # self._device = torch.device("cpu")
+        # placeholder for start of sentence and end of sentence
+        self._sos, self._eos = distinct_syscalls + 1, distinct_syscalls + 2
+        NUM_HEAD = 2
+        # distinct syscalls plus sos, eos and  plus 1 for unknown syscalls
+        NUM_TOKENS = distinct_syscalls + 3
         NUM_DECODER_LAYERS = 3
         NUM_ENCODER_LAYERS = 3
-        DIM_MODEL = 8
+        DIM_MODEL= 8  # embedding_size
         DROPOUT = 0.1
         self.transformer = Transformer(NUM_TOKENS,
-                                       NUM_HEAD,
                                        DIM_MODEL,
+                                       NUM_HEAD,
                                        NUM_ENCODER_LAYERS,
                                        NUM_DECODER_LAYERS,
                                        DROPOUT).to(DEVICE)
@@ -113,7 +115,7 @@ class TransformerDE(BuildingBlock):
         if self._input_vector.get_id() in dependencies:
             feature_list = dependencies[self._input_vector.get_id()]
         if self._transformer is None and feature_list is not None:
-            x = np.array([SOS] + list(feature_list) + [EOS])
+            x = np.array([self._sos] + list(feature_list) + [self._eos])
             self._training_data.append(x)
             self._current_batch.append(self._batch_counter)
             self._batch_counter += 1
@@ -137,7 +139,7 @@ class TransformerDE(BuildingBlock):
         if self._input_vector.get_id() in dependencies:
             feature_list = dependencies[self._input_vector.get_id()]
         if self._transformer is None and feature_list is not None:
-            x = np.array([SOS] + list(feature_list) + [EOS])
+            x = np.array([self._sos] + list(feature_list) + [self._eos])
             self._validation_data.append(x)
             self._current_batch_val.append(self._batch_counter_val)
             self._batch_counter_val += 1
@@ -149,13 +151,12 @@ class TransformerDE(BuildingBlock):
 
     def _create_train_data(self, val: bool):
         if not val:
-            print(self._training_data[0:3])
-            x_tensors = Variable(torch.Tensor(self._training_data)).to(self._device)
+            x_tensors = torch.tensor(np.array(self._training_data), dtype=torch.long).to(DEVICE)
             x_tensors_final = torch.reshape(x_tensors, (x_tensors.shape[0], 1, x_tensors.shape[1]))
             print(f"Training Shape x: {x_tensors_final.shape}")
             return SyscallFeatureDataSet(x_tensors_final)
         else:
-            x_tensors = Variable(torch.Tensor(self._validation_data)).to(self._device)
+            x_tensors = torch.tensor(np.array(self._validation_data), dtype=torch.long).to(DEVICE)
             x_tensors_final = torch.reshape(x_tensors, (x_tensors.shape[0], 1, x_tensors.shape[1]))
             print(f"Validation Shape x: {x_tensors_final.shape}")
             return SyscallFeatureDataSet(x_tensors_final)
@@ -170,7 +171,7 @@ class TransformerDE(BuildingBlock):
         # for custom batches
         train_dataloader = DataLoader(train_dataset, batch_sampler=self._batch_indices)
 
-        # val_dataloader = DataLoader(val_dataset, batch_sampler=self._batch_indices_val)
+        val_dataloader = DataLoader(val_dataset, batch_sampler=self._batch_indices_val)
         loss_fn = nn.CrossEntropyLoss()
         learning_rate = 0.001
         optimizer = torch.optim.Adam(self.transformer.parameters(),
@@ -182,11 +183,9 @@ class TransformerDE(BuildingBlock):
             train_loss = self.train_loop(self.transformer, optimizer, loss_fn, train_dataloader)
             print(f"Training Loss: {train_loss:.4f}")
             # end_time = timer()
-            # val_loss = self.evaluate(self.transformer)
-            # print((f"Epoch: {epoch},
-            # Train loss: {train_loss:.3f},
-            # Val loss: {val_loss:.3f},
-            # "f"Epoch time = {(end_time - start_time):.3f}s"))
+            # val_loss = self.validation_loop(self.transformer, loss_fn, val_dataloader)
+            # print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
+            # print(f"Validation Loss: {val_loss:.4f}")
 
     def predict(self, feature_list: list) -> float:
         """
@@ -260,6 +259,8 @@ class TransformerDE(BuildingBlock):
 
         for batch in dataloader:
             # print(batch)
+            if len(batch) < 2:
+                break
             X = batch
             y = batch
             X, y = torch.tensor(X).to(DEVICE), torch.tensor(y).to(DEVICE)
@@ -279,6 +280,9 @@ class TransformerDE(BuildingBlock):
 
             # Permute pred to have batch size first again
             pred = pred.permute(1, 2, 0)
+            # prediction probability for every possible syscall
+            # print(pred)
+            # print(y_expected)
             loss = loss_fn(pred, y_expected)
 
             opt.zero_grad()
@@ -297,10 +301,13 @@ class TransformerDE(BuildingBlock):
         total_loss = 0
 
         with torch.no_grad():
-            for X,y in dataloader:
-                X, y = batch[:, 0], batch[:, 1]
-                # print(y)
-                # X, y = torch.tensor(X, dtype=torch.long, device=DEVICE),
+            for batch in dataloader:
+
+                X = batch
+                y = batch
+                X, y = torch.tensor(X).to(DEVICE), torch.tensor(y).to(DEVICE)
+                y = torch.squeeze(y)
+                X = torch.squeeze(X)
                 # torch.tensor(y, dtype=torch.long, device=DEVICE)
 
                 # Now we shift the tgt by one so with the <SOS> we predict the token at pos 1
