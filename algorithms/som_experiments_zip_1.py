@@ -15,16 +15,16 @@ from dataloader.direction import Direction
 
 def get_configs():
     return [
-        {
-            'dim': 11,
-            'n_gram_size': 9,
-            'epochs': 100
-        },
-        {
-            'dim': 4,
-            'n_gram_size': 9,
-            'epochs': 50
-        },
+        # {
+        #   'dim': 11,
+        #   'n_gram_size': 9,
+        #    'epochs': 100
+        # },
+        # {
+        #    'dim': 4,
+        #    'n_gram_size': 9,
+        #    'epochs': 50
+        # },
         {
             'dim': 11,
             'n_gram_size': 5,
@@ -131,6 +131,6 @@ if __name__ == '__main__':
                 stats['quantization_error'] = DE.custom_fields['training_quantization_error']
                 stats['topographic_error'] = DE.custom_fields['training_topographic_error']
 
-                result_path = 'persistent_data/zip_1.json'
+                result_path = 'persistent_data/zip_1_2.json'
                 save_to_json(stats, result_path)
                 print_as_table(path=result_path)
