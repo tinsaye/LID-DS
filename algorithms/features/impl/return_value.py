@@ -5,30 +5,22 @@ from dataloader.syscall import Syscall
 
 class ReturnValue(BuildingBlock, metaclass=Singleton):
     """
-    calculate system call return value for specific syscalls.
-    Include:
-        write and writev are summarized as           write
-        read, readv and are summarized as            read
-        sendfile and sendmsg as                      send_socket
-        recvfrom recv and recvmsg as                 recv_socket
-        getdents as                                  get_dents
+    calculate system call return value for all syscalls.
     Training phase:
         save highest value.
-    calculateion phase:
+    calculation phase:
         normalize with highest value of training phase
-        return value is error code return -1
-        Error codes included only : EAGAIN, EINVAL, ECONNRESET, EPIPE
+        return value is not integer -> -1 
     """
 
     def __init__(self):
         super().__init__()
         self._max = {
         }
-        self.error_codes = ['EAGAIN', 'EINVAL', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']
 
     def train_on(self, syscall: Syscall):
         """
-        save max value of each specified syscall
+        save max value of each syscall
         """
         return_value_string = syscall.param('res')
         if return_value_string is not None:
@@ -46,9 +38,8 @@ class ReturnValue(BuildingBlock, metaclass=Singleton):
         """
         calculate return value type and normalize with max value of training phase
         return -1 if 
-            * syscall didnt have return value in training
+            * syscall never had return value in training
             * return value was not an integer value
-
         """
         return_type = None
         normalized_bytes = 0
