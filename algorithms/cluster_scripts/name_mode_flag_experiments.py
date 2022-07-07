@@ -35,8 +35,6 @@ if __name__ == '__main__':
     parser.add_argument('-a', dest='algorithm', type=str)
     args = parser.parse_args()
 
-
-
     # static bb features
     name = SyscallName()
     flags = Flags()
@@ -53,13 +51,18 @@ if __name__ == '__main__':
 
     # algorithms
     if args.algorithm == 'som':
-        algorithm = Som(input_vector=ngram, epochs=100)
+        algorithm = Som(input_vector=ngram,
+                        epochs=100,
+                        max_training_time=3600)
         config = {
             'epochs': 100
         }
     elif args.algorithm == 'ae':
         input_size = args.vector_size * args.n_gram_size
-        algorithm = AE(input_vector=ngram, hidden_size=int(math.sqrt(input_size)))
+        algorithm = AE(input_vector=ngram,
+                       hidden_size=int(math.sqrt(input_size)),
+                       max_training_time=3600,
+                       early_stopping_epochs=10000)
         config = {
             'hidden_size': int(math.sqrt(input_size))
         }
@@ -75,7 +78,9 @@ if __name__ == '__main__':
             hidden_size=64,
             hidden_layers=3,
             batch_size=512,
-            learning_rate=0.003
+            learning_rate=0.003,
+            max_training_time=3600,
+            early_stopping_epochs=10000
         )
         config = {
             'hidden_size': 64,

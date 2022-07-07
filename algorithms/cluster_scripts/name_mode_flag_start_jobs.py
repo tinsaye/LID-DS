@@ -1,8 +1,9 @@
 import os
+import sys
+import time
 
 if __name__ == '__main__':
     # parameter lists
-    # enc_sizes = range(2, 18, 2)  # [2, 4, ..., 16]
     enc_sizes = [2, 6, 10, 14]
     w2v_epochs = [50, 500, 5000]
     n_gram_sizes = [3, 5, 7, 9]
@@ -18,3 +19,5 @@ if __name__ == '__main__':
                     for scenario in scenarios:
                         for algorithm in algorithms:
                             os.system(f'sbatch batch_experiment.job {enc_size} {epochs} {n} {stream_size} {scenario} {algorithm}')
+                            time.sleep(0.25)
+                        sys.exit()
