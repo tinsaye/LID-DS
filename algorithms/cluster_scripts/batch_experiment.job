@@ -1,8 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lid-ds-experiment-v-$1-e-$2-n-$3-w-$4-s-$5-a-$6
-#SBATCH --partition=galaxy-test
-#SBATCH --time=00:30:00
-#SBATCH --mem=8G
+#SBATCH --time=06:00:00
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=1
 
 module load Python
