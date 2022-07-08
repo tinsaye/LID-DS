@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 
 if __name__ == '__main__':
@@ -20,4 +19,3 @@ if __name__ == '__main__':
                         for algorithm in algorithms:
                             os.system(f'sbatch batch_experiment.job {enc_size} {epochs} {n} {stream_size} {scenario} {algorithm}')
                             time.sleep(0.25)
-                        sys.exit()
