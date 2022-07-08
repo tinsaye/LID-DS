@@ -3,8 +3,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --job-name=lid-ds-experiment-v-$1-e-$2-n-$3-w-$4-s-$5-a-$6
 #SBATCH --partition=galaxy-job
-#SBATCH --time=6:00:00
-#SBATCH --mem=32G
+#SBATCH --time=00:30:00
+#SBATCH --mem=16G
 
 module load Python
 srun python -m name_mode_flag_experiments.py -v $1 -e $2 -n $3 -w $4 -s $5 -a $6
