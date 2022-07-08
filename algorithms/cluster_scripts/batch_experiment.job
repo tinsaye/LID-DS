@@ -6,4 +6,5 @@
 #SBATCH --cpus-per-task=1
 
 module load Python
-srun python -m name_mode_flag_experiments.py -v $1 -e $2 -n $3 -w $4 -s $5 -a $6
+module load matplotlib
+srun python3 name_mode_flag_experiments.py -v $1 -e $2 -n $3 -w $4 -s $5 -a $6
